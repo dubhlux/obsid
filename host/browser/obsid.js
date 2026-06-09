@@ -231,6 +231,12 @@ const Obsid = {
 
     const meshes = new Map();
     const textures = new Map();
+    // Custom fragment-shader programs (obsid.create_program). Not yet wired
+    // into the render loop — recorded so set_mesh_program stays harmless and a
+    // future integration can pick them up. Meshes fall back to the built-in
+    // lit shader until then.
+    const customPrograms = new Set();
+    let warnedCustomProgram = false;
 
     function newMesh() {
       return {
@@ -239,6 +245,7 @@ const Obsid = {
         vbo: null, ibo: null, count: 0,
         shininess: 32, specular: [0,0,0], alpha: 1,
         textureId: -1,
+        programId: -1, toon: null,
       };
     }
 
@@ -262,6 +269,63 @@ const Obsid = {
         aniso: quality.aniso,
       });
       textures.set(id, tex);
+    }
+
+    // Decode an encoded image (PNG/JPEG) supplied as raw bytes in WASM memory
+    // and upload it as a GL texture. Decoding via createImageBitmap is async,
+    // so a 1×1 white placeholder is registered immediately and swapped for the
+    // real texture once it resolves — the import itself stays synchronous so
+    // WASM never blocks while textures stream in.
+    function uploadTextureRaw(id, dataPtr, dataLen) {
+      // Copy out of WASM memory now: the bytes may be reused before decode ends.
+      const encoded = ObsidGL.viewU8(memory, dataPtr, dataLen).slice();
+      const placeholder = ObsidGL.createTexture(gl, new Uint8Array([255,255,255,255]), 1, 1, {});
+      const prev = textures.get(id);
+      if (prev) ObsidGL.deleteTexture(gl, prev);
+      textures.set(id, placeholder);
+
+      createImageBitmap(new Blob([encoded]), { premultiplyAlpha: "none", colorSpaceConversion: "none" })
+        .then((bitmap) => {
+          const tex = gl.createTexture();
+          gl.bindTexture(gl.TEXTURE_2D, tex);
+          // No Y-flip: matches the raw-pixel upload_texture path so glTF UVs
+          // are interpreted identically regardless of upload route.
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
+          const isPOT = (bitmap.width & (bitmap.width - 1)) === 0
+                     && (bitmap.height & (bitmap.height - 1)) === 0;
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+          if (quality.mipmap && isPOT) {
+            gl.generateMipmap(gl.TEXTURE_2D);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+          } else {
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+          }
+          const wrap = isPOT ? gl.REPEAT : gl.CLAMP_TO_EDGE;
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+          if (bitmap.close) bitmap.close();
+          // Swap in only if this id still points at our placeholder — it may
+          // have been reassigned or deleted while we were decoding.
+          if (textures.get(id) === placeholder) {
+            ObsidGL.deleteTexture(gl, placeholder);
+            textures.set(id, tex);
+          } else {
+            ObsidGL.deleteTexture(gl, tex);
+          }
+        })
+        .catch((err) => {
+          console.warn(`obsid: upload_texture_raw decode failed for texture ${id}:`, err);
+        });
+    }
+
+    // Re-upload only the vertex buffer of an existing mesh (indices unchanged).
+    // Used for per-frame CPU skinning / morph targets: WASM recomputes the
+    // vertex positions and pushes the new buffer here every frame.
+    function updateMeshVerts(id, vertPtr, vertCount) {
+      const m = meshes.get(id);
+      if (!m || !m.vbo) return;
+      const verts = ObsidGL.viewF32(memory, vertPtr, vertCount * VERT_FLOATS);
+      ObsidGL.uploadVertexBuffer(gl, m.vbo, verts, gl.DYNAMIC_DRAW);
     }
 
     // ── Render State ──────────────────────────────────
@@ -506,6 +570,30 @@ const Obsid = {
         delete_texture(id){
           const tex = textures.get(N(id));
           if (tex) { ObsidGL.deleteTexture(gl, tex); textures.delete(N(id)); }
+        },
+        upload_texture_raw(id, data_ptr, data_len){
+          uploadTextureRaw(N(id), N(data_ptr), N(data_len));
+        },
+        update_mesh_verts(id, vert_ptr, vert_count){
+          updateMeshVerts(N(id), N(vert_ptr), N(vert_count));
+        },
+        set_mesh_toon(mesh_id, shade_r, shade_g, shade_b, threshold){
+          const m = meshes.get(N(mesh_id));
+          if (m) m.toon = { shade: [shade_r, shade_g, shade_b], threshold };
+        },
+        create_program(id, frag_ptr, frag_len){
+          // Custom fragment shaders aren't integrated into the render loop yet;
+          // record the id so set_mesh_program is harmless and meshes keep using
+          // the built-in lit shader.
+          customPrograms.add(N(id));
+          if (!warnedCustomProgram) {
+            console.info("obsid: create_program — custom shaders fall back to the built-in lit shader (not yet integrated).");
+            warnedCustomProgram = true;
+          }
+        },
+        set_mesh_program(mesh_id, program_id){
+          const m = meshes.get(N(mesh_id));
+          if (m) m.programId = N(program_id);
         },
 
         // Camera & lighting
