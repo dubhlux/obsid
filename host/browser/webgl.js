@@ -32,11 +32,16 @@ const AlmideWebGL = {
       return idx > 0 ? handles[idx] : null;
     }
 
+    // Almide container ABI (compiler ≥ 0.26): String / List are laid out as
+    //   [len: i32][cap: i32][payload...]
+    // so the payload (UTF-8 bytes / elements) starts 8 bytes in, NOT 4.
+    const HEADER = 8;
+
     function readString(ptr) {
       const p = N(ptr);
       const view = new DataView(memory.buffer);
       const len = view.getInt32(p, true);
-      return new TextDecoder().decode(new Uint8Array(memory.buffer, p + 4, len));
+      return new TextDecoder().decode(new Uint8Array(memory.buffer, p + HEADER, len));
     }
 
     function readListF64(ptr) {
@@ -45,7 +50,7 @@ const AlmideWebGL = {
       const len = view.getInt32(p, true);
       const arr = new Float32Array(len);
       for (let i = 0; i < len; i++) {
-        arr[i] = view.getFloat64(p + 4 + i * 8, true);
+        arr[i] = view.getFloat64(p + HEADER + i * 8, true);
       }
       return arr;
     }
@@ -56,7 +61,7 @@ const AlmideWebGL = {
       const len = view.getInt32(p, true);
       const arr = new Uint16Array(len);
       for (let i = 0; i < len; i++) {
-        arr[i] = Number(view.getBigInt64(p + 4 + i * 8, true));
+        arr[i] = Number(view.getBigInt64(p + HEADER + i * 8, true));
       }
       return arr;
     }
