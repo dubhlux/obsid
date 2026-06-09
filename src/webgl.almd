@@ -175,6 +175,15 @@ fn buffer_data_f32(target: Int, data: List[Float], usage: Int) -> Unit
 @extern(wasm, "webgl", "buffer_data_u16")
 fn buffer_data_u16(target: Int, data: List[Int], usage: Int) -> Unit
 
+// Zero-copy buffer uploads from a raw Bytes payload pointer (bytes.data_ptr,
+// which points at the raw payload with no length header). `byte_len` is in
+// bytes. Prefer these over the List variants for large meshes (e.g. VRM).
+@extern(wasm, "webgl", "buffer_data_f32_ptr")
+fn buffer_data_f32_ptr(target: Int, ptr: Int, byte_len: Int, usage: Int) -> Unit
+
+@extern(wasm, "webgl", "buffer_data_u16_ptr")
+fn buffer_data_u16_ptr(target: Int, ptr: Int, byte_len: Int, usage: Int) -> Unit
+
 // ── Textures ────────────────────────────────────────
 
 @extern(wasm, "webgl", "create_texture")
@@ -188,6 +197,12 @@ fn tex_parameteri(target: Int, pname: Int, param: Int) -> Unit
 
 @extern(wasm, "webgl", "active_texture")
 fn active_texture(unit: Int) -> Unit
+
+// Decode an encoded image (PNG/JPEG) from a raw Bytes payload and upload it to
+// the given texture handle. Async on the host (placeholder until decoded), so
+// from Almide this returns immediately.
+@extern(wasm, "webgl", "tex_image_2d_encoded")
+fn tex_image_2d_encoded(texture: Int, ptr: Int, byte_len: Int) -> Unit
 
 // ── Drawing ─────────────────────────────────────────
 

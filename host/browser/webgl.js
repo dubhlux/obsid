@@ -142,12 +142,52 @@ const AlmideWebGL = {
         buffer_data_u16(target, dataPtr, usage) {
           gl.bufferData(N(target), readListI64asU16(dataPtr), N(usage));
         },
+        // Zero-copy uploads from a raw Bytes payload (bytes.data_ptr points at
+        // the raw payload, with NO [len][cap] header). byte_len is in bytes.
+        // Preferred for large meshes (VRM) over the List[Float] variants.
+        buffer_data_f32_ptr(target, ptr, byte_len, usage) {
+          const view = new Float32Array(memory.buffer, N(ptr), N(byte_len) / 4);
+          gl.bufferData(N(target), view, N(usage));
+        },
+        buffer_data_u16_ptr(target, ptr, byte_len, usage) {
+          const view = new Uint16Array(memory.buffer, N(ptr), N(byte_len) / 2);
+          gl.bufferData(N(target), view, N(usage));
+        },
 
         // Textures
         create_texture() { return addHandle(gl.createTexture()); },
         bind_texture(target, tex) { gl.bindTexture(N(target), getHandle(tex)); },
         tex_parameteri(target, pname, param) { gl.texParameteri(N(target), N(pname), N(param)); },
         active_texture(unit) { gl.activeTexture(N(unit)); },
+        // Decode an encoded image (PNG/JPEG) from a raw Bytes payload and upload
+        // it to texture handle `tex`. Async: a 1×1 white placeholder is set now
+        // and replaced once decode resolves, so the import stays synchronous and
+        // WASM never blocks. Sets sensible filters/wrap (mipmaps when POT).
+        tex_image_2d_encoded(tex, ptr, byte_len) {
+          const handle = getHandle(tex);
+          const encoded = new Uint8Array(memory.buffer, N(ptr), N(byte_len)).slice();
+          gl.bindTexture(gl.TEXTURE_2D, handle);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+                        new Uint8Array([255, 255, 255, 255]));
+          createImageBitmap(new Blob([encoded]), { premultiplyAlpha: "none", colorSpaceConversion: "none" })
+            .then((bmp) => {
+              gl.bindTexture(gl.TEXTURE_2D, handle);
+              gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bmp);
+              const isPOT = (bmp.width & (bmp.width - 1)) === 0 && (bmp.height & (bmp.height - 1)) === 0;
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+              if (isPOT) {
+                gl.generateMipmap(gl.TEXTURE_2D);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+              } else {
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+              }
+              const wrap = isPOT ? gl.REPEAT : gl.CLAMP_TO_EDGE;
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+              if (bmp.close) bmp.close();
+            })
+            .catch((e) => console.warn("tex_image_2d_encoded decode failed:", e));
+        },
 
         // Drawing
         draw_arrays(mode, first, count) { gl.drawArrays(N(mode), N(first), N(count)); },
