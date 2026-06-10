@@ -27,7 +27,8 @@ const AlmideWebGL = {
       handles.push(obj);
       return B(handles.length - 1);
     }
-    function getHandle(id) {
+    const texContent = new WeakSet();
+      function getHandle(id) {
       const idx = (typeof id === "bigint") ? N(id) : id;
       return idx > 0 ? handles[idx] : null;
     }
@@ -166,11 +167,16 @@ const AlmideWebGL = {
         tex_image_2d_encoded(tex, ptr, byte_len) {
           const handle = getHandle(tex);
           const encoded = new Uint8Array(memory.buffer, N(ptr), N(byte_len)).slice();
-          gl.bindTexture(gl.TEXTURE_2D, handle);
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-                        new Uint8Array([255, 255, 255, 255]));
+          // Placeholder only on FIRST upload; re-uploads keep the old pixels
+          // until the new bitmap is decoded (no white flash on live recolor).
+          if (!texContent.has(handle)) {
+            gl.bindTexture(gl.TEXTURE_2D, handle);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+                          new Uint8Array([255, 255, 255, 255]));
+          }
           createImageBitmap(new Blob([encoded]), { premultiplyAlpha: "none", colorSpaceConversion: "none" })
             .then((bmp) => {
+              texContent.add(handle);
               gl.bindTexture(gl.TEXTURE_2D, handle);
               gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bmp);
               const isPOT = (bmp.width & (bmp.width - 1)) === 0 && (bmp.height & (bmp.height - 1)) === 0;
