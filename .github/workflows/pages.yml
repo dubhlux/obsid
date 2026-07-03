@@ -21,37 +21,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Almide build
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/almide
-          # Bump the hash whenever develop ships a WASM codegen change that
-          # affects obsid output (e.g. multi-memory removal, new instructions).
-          key: almide-${{ runner.os }}-develop-9a88e2a1
-
-      - name: Install Almide
-        run: |
-          if [ ! -f ~/.cargo/bin/almide ]; then
-            cargo install --git https://github.com/almide/almide --branch develop almide
-          fi
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Verify Almide version
-        run: almide --version
-
-      - name: Build all examples
-        run: |
-          mkdir -p host/browser/examples
-          almide build src/main.almd           --target wasm -o host/browser/examples/heightmap.wasm
-          almide build examples/triangle.almd  --target wasm -o host/browser/examples/triangle.wasm
-          almide build examples/sphere.almd    --target wasm -o host/browser/examples/sphere.wasm
-          almide build examples/torus.almd     --target wasm -o host/browser/examples/torus.wasm
-          almide build examples/checker.almd   --target wasm -o host/browser/examples/checker.wasm
-          ls -la host/browser/examples/
-
+      # NOTE: examples are committed prebuilt (host/browser/examples/*.wasm,
+      # built with almide 0.27.x and verified in-browser). The previous
+      # "cargo install --branch develop" rebuild produced binaries that trap
+      # with "render_frame: unreachable" — do not reintroduce CI rebuilds
+      # until the develop wasm codegen regression is fixed.
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
