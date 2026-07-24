@@ -7,3 +7,5 @@ target/
 # Prebuilt browser example binaries served by GitHub Pages (compiler on
 # develop currently miscompiles obsid; see pages.yml)
 !host/browser/examples/*.wasm
+
+almide.lock.local-backup
